@@ -1,0 +1,27 @@
+menu "Project config"
+
+    config WOL_WIFI_SSID
+        string "The Wi-Fi SSID"
+        default "CHANGEME"
+        help
+            The SSID (network name) for the program to connect to.
+
+    config WOL_WIFI_PASSWORD
+        string "The Wi-Fi Password"
+        default "CHANGEME"
+        help
+            The Wi-Fi password for the program to use.
+
+    config WOL_WIFI_HOSTNAME
+        string "Wi-Fi host name"
+        default "espressif"
+        help
+            The Wi-Fi host name that will be displayed when this device is connected.
+
+    config WOL_WIFI_RETRY_ATTEMPT
+        int "Wi-Fi retry attempt"
+        default 5
+        help
+            The retry attempt when attempting to connect or re-connect into the Wi-Fi AP station.
+
+endmenu

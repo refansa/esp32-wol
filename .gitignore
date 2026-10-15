@@ -1,0 +1,14 @@
+build/
+build_*_*/
+.cache
+.vscode
+
+sdkconfig
+sdkconfig.old
+
+# AI Agent directories
+.omp/
+.pi/
+.opencode/
+.codex/
+.claude/
