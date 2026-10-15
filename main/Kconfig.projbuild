@@ -24,4 +24,22 @@ menu "Project config"
         help
             The retry attempt when attempting to connect or re-connect into the Wi-Fi AP station.
 
+    config WOL_HTTP_SERVER_PORT
+        int "Http server port"
+        default 8000
+        help
+            The port number to be assigned to the http server.
+
+    config WOL_TARGET_MAC_ADDRESS
+        string "Target physical MAC address"
+        default "XX:XX:XX:XX:XX:XX"
+        help
+            The target physical MAC address that will be the receiver of the WoL magic packet.
+
+    config WOL_TARGET_BROADCAST_IP
+        string "Target broadcast IP"
+        default "255.255.255.255"
+        help
+            The target broadcast IP that can resolve the physical MAC address.
+
 endmenu
