@@ -45,7 +45,7 @@ wol_handler(httpd_req_t* req)
   unsigned char mac_bytes[MAC_BYTES_LENGTH];
   parse_mac(mac_str, mac_bytes);
 
-  unsigned char packet[PACKET_SIZE];
+  unsigned char packet[MAGIC_PACKET_SIZE];
   memset(packet, 0xFF, MAC_BYTES_LENGTH);
 
   // Append the MAC address 16 times
@@ -93,7 +93,7 @@ wol_handler(httpd_req_t* req)
   // Send packet
   sent_bytes = sendto(sock,
                       packet,
-                      PACKET_SIZE,
+                      MAGIC_PACKET_SIZE,
                       0,
                       (struct sockaddr*)&target_addr,
                       sizeof(target_addr));
@@ -127,17 +127,13 @@ static httpd_uri_t health_uri = {
 };
 
 static httpd_uri_t wol_uri = {
-  .method = HTTP_POST,
+  .method = HTTP_GET,
   .uri = "/wol",
   .handler = wol_handler,
   .user_ctx = NULL,
 };
 
-/**
- * @brief Start the http server to the set port number.
- *
- */
-httpd_handle_t*
+httpd_handle_t
 start_http_server(void)
 {
   httpd_handle_t server = NULL;
@@ -160,12 +156,8 @@ start_http_server(void)
   return server;
 }
 
-/**
- * @brief Stop the http server.
- *
- */
 esp_err_t
-stop_http_server(httpd_handle_t* server)
+stop_http_server(httpd_handle_t server)
 {
   return httpd_stop(server);
 }

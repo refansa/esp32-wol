@@ -42,4 +42,16 @@ menu "Project config"
         help
             The target broadcast IP that can resolve the physical MAC address.
 
+    config TAILSCALE_AUTH_KEY
+        string "Tailscale authentication key"
+        default ""
+        help
+            The Tailscale authentication key, obtain it at the Tailscale Admin Console.
+
+    config TAILSCALE_DEVICE_NAME
+        string "Tailscale device name"
+        default WOL_WIFI_HOSTNAME
+        help
+            The Tailscale device name that will appear on the device list, default to WOL_WIFI_HOSTNAME.
+
 endmenu

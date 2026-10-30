@@ -3,31 +3,37 @@
  * ESP-32 WoL
  *
  * Minimal Wake-over-LAN implementation reachable over the internet through
- * Wi-Fi connection.
+ * Tailscale network with Wi-Fi connection.
  */
 
 #include "esp32-wol.h"
 #include "esp32-wol-http-server.h"
+#include "microlink.h"
 
 #include "esp_err.h"
 #include "esp_event.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_netif.h"
-#include "esp_netif_types.h"
 #include "esp_wifi.h"
 #include "esp_wifi_default.h"
 #include "esp_wifi_types_generic.h"
 #include "lwip/err.h"
-#include "nvs.h"
 #include "nvs_flash.h"
 #include "sdkconfig.h" // IWYU pragma: keep this for the CONFIG_* macros.
+#include <stdbool.h>
 #include <string.h>
+#include <unistd.h>
 
 const static char* TAG = "esp32-wol";
 
 static int retried_attempt = 0;
+static bool connected_once = false;
+static bool wifi_gave_up = false;
 static httpd_handle_t http_server = NULL;
+
+// MicroLink handle
+static microlink_t* ml = NULL;
 
 static void
 event_sta_start_handler(void* arg,
@@ -44,14 +50,40 @@ event_sta_disconnected_handler(void* arg,
                                int32_t event_id,
                                void* event_data)
 {
-  if (retried_attempt < CONFIG_WOL_WIFI_RETRY_ATTEMPT) {
-    esp_wifi_connect();
-    retried_attempt++;
-    ESP_LOGI(TAG, "Attempting to reconnect to the AP (%d)", retried_attempt);
-  } else {
-    ESP_LOGE(TAG, "Failed to connect to the SSID: %s", CONFIG_WOL_WIFI_SSID);
-    ESP_ERROR_CHECK(stop_http_server(http_server));
+  if (wifi_gave_up) {
+    return;
   }
+
+  retried_attempt++;
+
+  if (!connected_once) {
+    // Boot phase, trying to do an initial connection.
+    if (retried_attempt <= CONFIG_WOL_WIFI_RETRY_ATTEMPT) {
+      ESP_LOGW(TAG,
+               "Initial connection failed, retrying (%d/%d)",
+               retried_attempt,
+               CONFIG_WOL_WIFI_RETRY_ATTEMPT);
+    } else {
+      // Repeated failures during boot most likely mean bad credentials.
+      // Give up: no more reconnects, app_main stops the app.
+      ESP_LOGE(TAG,
+               "Could not connect to SSID '%s' after %d attempts, "
+               "check CONFIG_WOL_WIFI_SSID and CONFIG_WOL_WIFI_PASSWORD. "
+               "Giving up.",
+               CONFIG_WOL_WIFI_SSID,
+               CONFIG_WOL_WIFI_RETRY_ATTEMPT);
+      wifi_gave_up = true;
+      return;
+    }
+  } else {
+    // Already connected at least once, retry indefinitely.
+    ESP_LOGW(TAG,
+             "Disconnected from SSID '%s', reconnecting (attempt %d)",
+             CONFIG_WOL_WIFI_SSID,
+             retried_attempt);
+  }
+
+  esp_wifi_connect();
 }
 
 static void
@@ -61,16 +93,13 @@ event_sta_connected_handler(void* arg,
                             void* event_data)
 {
   retried_attempt = 0;
+  connected_once = true;
   ESP_LOGI(TAG, "Successfully connected to the SSID: %s", CONFIG_WOL_WIFI_SSID);
   if (http_server == NULL) {
     http_server = start_http_server();
   }
 }
 
-/**
- * @brief Register wifi event handlers.
- *
- */
 static esp_err_t
 register_wifi_event_handler(void)
 {
@@ -99,14 +128,42 @@ register_wifi_event_handler(void)
   return ERR_OK;
 }
 
-/**
- * @brief Initialize the NVS partition.
- *
- * Attempt to initialize the NVS, if it encountered ESP_ERR_NVS_NO_FREE_PAGES
- * or ESP_ERR_NVS_NEW_VERSION_FOUND error, we try to erase it, and
- * re-initialize it.
- *
- */
+static void
+on_ml_state_change(microlink_t* ml_handle,
+                   microlink_state_t state,
+                   void* user_data)
+{
+  const char* state_names[] = { "IDLE",        "WIFI_WAIT", "CONNECTING",
+                                "REGISTERING", "CONNECTED", "RECONNECTING",
+                                "ERROR" };
+  const char* name = (state < sizeof(state_names) / sizeof(state_names[0]))
+                       ? state_names[state]
+                       : "UNKNOWN";
+  ESP_LOGI(TAG, "MicroLink state: %s", name);
+
+  if (state == ML_STATE_CONNECTED) {
+    uint32_t ip = microlink_get_vpn_ip(ml_handle);
+    char ip_str[16];
+    microlink_ip_to_str(ip, ip_str);
+    ESP_LOGI(TAG, "MicroLink Connected! VPN IP: %s", ip_str);
+  }
+}
+
+static void
+on_ml_peer_update(microlink_t* ml_handle,
+                  const microlink_peer_info_t* peer,
+                  void* user_data)
+{
+  char ip_str[16];
+  microlink_ip_to_str(peer->vpn_ip, ip_str);
+  ESP_LOGI(TAG,
+           "Peer: %s (%s) online=%d direct=%d",
+           peer->hostname,
+           ip_str,
+           peer->online,
+           peer->direct_path);
+}
+
 static esp_err_t
 nvs_init(void)
 {
@@ -119,10 +176,6 @@ nvs_init(void)
   return ret;
 }
 
-/**
- * @brief Initialize, register event handlers, and start the Wi-Fi driver.
- *
- */
 static esp_err_t
 wifi_init(void)
 {
@@ -153,6 +206,31 @@ wifi_init(void)
   return esp_wifi_start();
 }
 
+static esp_err_t
+ml_init(void)
+{
+  microlink_config_t config = {
+    .auth_key = CONFIG_TAILSCALE_AUTH_KEY,
+    .device_name = CONFIG_TAILSCALE_DEVICE_NAME,
+    .enable_derp = true,
+    .enable_stun = true,
+    .enable_disco = true,
+    .wifi_tx_power_dbm = 13, // Reduced for thermal management.
+  };
+
+  ml = microlink_init(&config);
+  if (!ml) {
+    ESP_LOGE(TAG, "Failed to initialize MicroLink");
+    return ESP_FAIL;
+  }
+
+  // Register callbacks
+  microlink_set_state_callback(ml, on_ml_state_change, NULL);
+  microlink_set_peer_callback(ml, on_ml_peer_update, NULL);
+
+  return microlink_start(ml);
+}
+
 void
 app_main(void)
 {
@@ -174,6 +252,11 @@ app_main(void)
   ESP_LOGI(TAG,
            "CONFIG_WOL_TARGET_BROADCAST_IP      : %s",
            CONFIG_WOL_TARGET_BROADCAST_IP);
+  ESP_LOGI(
+    TAG, "CONFIG_TAILSCALE_AUTH_KEY           : %s", CONFIG_TAILSCALE_AUTH_KEY);
+  ESP_LOGI(TAG,
+           "CONFIG_TAILSCALE_DEVICE_NAME        : %s",
+           CONFIG_TAILSCALE_DEVICE_NAME);
 
   if (CONFIG_WOL_WIFI_RETRY_ATTEMPT < 0) {
     ESP_LOGE(TAG, "CONFIG_WOL_WIFI_RETRY_ATTEMPT cannot be less than 0!");
@@ -191,10 +274,23 @@ app_main(void)
     return;
   }
 
+  if (strcmp(CONFIG_TAILSCALE_AUTH_KEY, "") == 0) {
+    ESP_LOGE(TAG, "CONFIG_TAILSCALE_AUTH_KEY has not been set!");
+    return;
+  }
+
   ESP_ERROR_CHECK(nvs_init());
   ESP_ERROR_CHECK(wifi_init());
+  ESP_ERROR_CHECK(ml_init());
 
-  while (http_server) {
-    sleep(5);
+  while (1) {
+    // Stop immediately if initial Wi-Fi connection failed.
+    if (wifi_gave_up) {
+      ESP_LOGE(TAG, "Initial Wi-Fi connection failed. Stopping the app");
+      microlink_stop(ml);
+      esp_wifi_stop();
+      vTaskDelete(NULL);
+    }
+    sleep(1);
   }
 }
