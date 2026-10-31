@@ -1,0 +1,23 @@
+# Required by MicroLink's Noise control handshake: it uses ChaCha20-Poly1305
+# through PSA. Without these, psa_import_key() fails and msg1 is rejected by
+# the control plane with a silent close after HTTP 101.
+CONFIG_MBEDTLS_CHACHA20_C=y
+CONFIG_MBEDTLS_CHACHAPOLY_C=y
+
+# ESP32-S3-N16R8: 8 MB octal PSRAM (verified at boot: "Found 8MB PSRAM device").
+# MicroLink's 512 KB HTTP/2 + JSON buffers live there. Quad mode does not work.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+
+CONFIG_ML_H2_BUFFER_SIZE_KB=512
+CONFIG_ML_JSON_BUFFER_SIZE_KB=512
+
+# 16 MB flash, not the IDF default 2 MB.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# Custom table: nvs/phy_init at their stock offsets (device keys and peer cache
+# survive a reflash), 8 MiB factory app.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

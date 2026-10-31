@@ -1,6 +1,7 @@
+#include "esp32-wol-http-server.h"
+
 #include "esp_err.h"
 #include "esp_http_server.h"
-#include "esp32-wol-http-server.h"
 #include "esp_log.h"
 #include "http_parser.h"
 #include "sdkconfig.h" // IWYU pragma: keep this for the CONFIG_* macros.

@@ -1,0 +1,12 @@
+# 16 MB flash (ESP32-S3-N16R8, octal PSRAM).
+#
+# nvs and phy_init keep the stock offsets/sizes so the device's machine key,
+# WireGuard key and peer cache survive a reflash; the bootloader is unchanged.
+# The factory app gets 8 MiB (current image is ~0.6 MiB); the remaining ~8 MiB
+# is left unallocated on purpose, so an OTA slot or a data partition can be
+# added later without moving the app.
+#
+# Name,     Type, SubType, Offset,   Size,     Flags
+nvs,        data, nvs,     0x9000,   0x6000,
+phy_init,   data, phy,     0xf000,   0x1000,
+factory,    app,  factory, 0x10000,  0x800000,
